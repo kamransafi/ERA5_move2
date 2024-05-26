@@ -1,13 +1,13 @@
 # Main execution
-source("/home/kami/Documents/Research/Data_Scripts/Scripts/ERA5/ERA5_functions.r")
+source(".../ERA5_functions.r")
 
 # Set the directory path for the ERA5 files
-era5_dir <- "/home/kami/Documents/Research/Data_Scripts/Data/Study24442409"
+era5_dir <- ".../Study24442409"
 
 # Load the bird track data
 bird_track <- readRDS(paste(era5_dir, "Track.rds", sep = "/"))
 
-# Register a parallel backend
+# Register a parallel back-end
 registerDoMC(cores = parallel::detectCores() - 1)
 
 # List all ERA5 files in the directory
@@ -20,7 +20,7 @@ end_time <- Sys.time()
 print(paste("Time taken for extracting track data:", round(difftime(end_time, start_time, units="mins"), 2), "minutes"))
 # Remove NULL elements from the list)
 extracted_data_list <- extracted_data_list[!sapply(extracted_data_list, is.null)]
-#also do not keep list elements with empty data frames
+# Also do not keep list elements with empty data frames
 extracted_data_list <- extracted_data_list[sapply(extracted_data_list, function(x) nrow(x$bird_track_data) > 0)]
 # Annotate wind data in parallel
 start_time <- Sys.time()
