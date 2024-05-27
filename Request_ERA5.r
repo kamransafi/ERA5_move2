@@ -15,8 +15,9 @@ Local_path <- paste(".../Data/Study", studyID, sep="")
 if (!dir.exists()) dir.create(Local_path)
 
 ### This part can/should be adjusted to your needs in regard to the movement data that you want to annotate ###
-# What is important that at the end there is a Track.rds file stored in the Local_path and 
-# that the very same movement data is contained in the object "Track"!
+# What is important that at the end there is a Track.rds file stored in the Local_path
+# This Track object can be either a move2 object according to the movebank standard, or
+# a data.frame with columns "event_id", "Long", "Lat", "timestamp", and "height_above_ellipsoid".
 # here I use the movebank_download_study function to download the movement data from movebank with no further adjustments
 
 # check if movement data has been stored in the working directory and skip downloading from movebank if it has
@@ -36,11 +37,15 @@ if (!file.exists(paste(Local_path, Track.rds, sep="/"))) {
 ### End of the part that can/should be adjusted ###
 
 
+
 # set the request area based on the movement data
-areaS <- area2request(Track)
+# this function takes either bbox object or a vector with 
+# c(min(Track$Lon, na.rm=T), max(Track$Lon, na.rm=T), min(Track$Lat, na.rm=T), max(Track$Lat, na.rm=T))
+areaS <- area2request(st_bbox(Track))
 
 # create the requests for the track
-reqTable <- date2request(Track)
+# this function takes the timestamp column
+reqTable <- date2request(Track$timestamp)
 print(paste("Number of days to be requested:", nrow(reqTable)))
 
 # check for existing files and remove corresponding existing requests from the request list

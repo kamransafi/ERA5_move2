@@ -5,6 +5,7 @@ source(".../ERA5_functions.r")
 era5_dir <- ".../Study24442409"
 
 # Load the bird track data
+# again this can be a move2 object or a data.frame with columns "eventID", "Long", "Lat", "timestamp", and "height_above_ellipsoid"
 bird_track <- readRDS(paste(era5_dir, "Track.rds", sep = "/"))
 
 # Register a parallel back-end
@@ -15,7 +16,7 @@ era5_files <- list.files(era5_dir, pattern = "^download_ERA5_.*\\.nc$", full.nam
 
 # Extract track data for each ERA5 file in parallel
 start_time <- Sys.time()
-extracted_data_list <- llply(era5_files, function(x) extract_track_and_era5_data(bird_track, x), .parallel = TRUE)
+extracted_data_list <- llply(era5_files, function(x) extract_track_and_era5_data(track=bird_track, era5_file=x), .parallel = TRUE)
 end_time <- Sys.time()
 print(paste("Time taken for extracting track data:", round(difftime(end_time, start_time, units="mins"), 2), "minutes"))
 # Remove NULL elements from the list)

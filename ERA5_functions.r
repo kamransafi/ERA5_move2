@@ -10,8 +10,15 @@ library(data.table)
 
 # Function to define the area for CDS API
 area2request <- function(x, ext = 0.01) {
+  #check if the input is a bbox
+  if(!is(x, "bbox")){
+    bounds <- x
+  }
+  #check whether the input is a vector of length 4
+  if(is(x, "numeric") && length(x) == 4){
+    bounds <- data.frame(xmin = x[1],  ymin = x[3], xmax = x[2], ymax = x[4])
+  }
   #area: [north, west, south, east]
-  (bounds <- st_bbox(x))
   x_range <- bounds$xmax - bounds$xmin
   y_range <- bounds$ymax - bounds$ymin
   west <- floor(bounds$xmin - ext * x_range)
@@ -27,7 +34,7 @@ area2request <- function(x, ext = 0.01) {
 
 # Function to generate request table from date range
 date2request <- function(x) {
-  DateTime <- sort(unique(c(floor_date(x$timestamp, "hour"), floor_date(x$timestamp+3600, "hour"))))
+  DateTime <- sort(unique(c(floor_date(x, "hour"), floor_date(x+3600, "hour"))))
   reqTable <- data.frame(year=year(DateTime), month=sprintf("%02d", month(DateTime)), day=sprintf("%02d", day(DateTime)), hour=sprintf("%02d",hour(DateTime)))
   #split the table into a list with all the observations with the same year, month, day
   reqTable <- split(reqTable, apply(reqTable[,1:3], 1, paste0, collapse=""))
@@ -124,32 +131,40 @@ send_requests <- function(reqList, localPath, user, batch_size) {
 
 
 # Function to extract relevant data from the bird track and ERA5 file
-extract_track_and_era5_data <- function(bird_track, era5_file) {
+## Change the function to accept move2 or data.frame as input ##
+extract_track_and_era5_data <- function(track, era5_file) {
   # Extract the date from the ERA5 file name
   era5_date <- ymd(as.numeric(strsplit(basename(era5_file), "_")[[1]][3] %>% substr(1, 8)))
   
   # Find the event ID for the given date
-  event_id <- bird_track$event_id[ymd(paste(year(bird_track$timestamp), sprintf("%02d", month(bird_track$timestamp)), sprintf("%02d", day(bird_track$timestamp)))) == era5_date]
+  event_id <- track$event_id[ymd(paste(year(track$timestamp), sprintf("%02d", month(track$timestamp)), sprintf("%02d", day(track$timestamp)))) == era5_date]
   
   # Extract coordinates, times, and heights for the given date
-  coords <- as.matrix(st_coordinates(bird_track[ymd(paste(year(bird_track$timestamp), sprintf("%02d", month(bird_track$timestamp)), sprintf("%02d", day(bird_track$timestamp)))) == era5_date, ]))
-  times <- mt_time(bird_track[ymd(paste(year(bird_track$timestamp), sprintf("%02d", month(bird_track$timestamp)), sprintf("%02d", day(bird_track$timestamp)))) == era5_date, ])
-  heights <- bird_track$height_above_ellipsoid[ymd(paste(year(bird_track$timestamp), sprintf("%02d", month(bird_track$timestamp)), sprintf("%02d", day(bird_track$timestamp)))) == era5_date]
-  
+  if(is(track, "move2")){
+    coords <- as.matrix(st_coordinates(track[ymd(paste(year(track$timestamp), sprintf("%02d", month(track$timestamp)), sprintf("%02d", day(track$timestamp)))) == era5_date, ]))
+    times <- mt_time(track[ymd(paste(year(track$timestamp), sprintf("%02d", month(track$timestamp)), sprintf("%02d", day(track$timestamp)))) == era5_date, ])
+    heights <- track$height_above_ellipsoid[ymd(paste(year(track$timestamp), sprintf("%02d", month(track$timestamp)), sprintf("%02d", day(track$timestamp)))) == era5_date]
+  }
+  if(is(track, "data.frame")){
+    coords <- track[ymd(paste(year(track$timestamp), sprintf("%02d", month(track$timestamp)), sprintf("%02d", day(track$timestamp)))) == era5_date, c("Long", "Lat")]
+    times <- track$timestamp[ymd(paste(year(track$timestamp), sprintf("%02d", month(track$timestamp)), sprintf("%02d", day(track$timestamp)))) == era5_date]
+    heights <- track$height_above_ellipsoid[ymd(paste(year(track$timestamp), sprintf("%02d", month(track$timestamp)), sprintf("%02d", day(track$timestamp)))) == era5_date]
+  }
   # Create a list with the extracted data
   extracted_data <- list(
     era5_file_name = era5_file,
     era5_date = era5_date,
-    bird_track_data = data.frame(
+    track_data = data.frame(
       event_id = event_id,
-      coords = coords,
-      times = times,
-      heights = heights
+      Long = coords[,1],
+      Lat = coords[,2],
+      timestamp = times,
+      height_above_ellipsoid = heights
     )
   )
   
   # Remove rows with missing values
-  extracted_data$bird_track_data <- extracted_data$bird_track_data[complete.cases(extracted_data$bird_track_data), ]
+  extracted_data$track_data <- extracted_data$track_data[complete.cases(extracted_data$track_data), ]
   
   return(extracted_data)
 }
@@ -160,7 +175,7 @@ annotate_wind_data <- function(extracted_data) {
   era5_raster <- rast(extracted_data$era5_file_name)
   
   # Extract coordinates from the input data
-  coords <- extracted_data$bird_track_data[, c("coords.X", "coords.Y")]
+  coords <- extracted_data$track_data[, c("Long", "Lat")]
   
   # Extract bilinear interpolated data for u, v, and z variables
   bilinear_data <- terra::extract(era5_raster, coords, method = "bilinear")
@@ -177,19 +192,19 @@ annotate_wind_data <- function(extracted_data) {
   trilinear_data <- data.frame(apply(layers_to_process, 1, function(x) {
     layer_id <- grep(paste0(x, collapse = "_"), names(bilinear_data))
     tmp <- bilinear_data[, layer_id]
-    ret <- unlist(lapply(1:nrow(tmp), function(y) approx(time(era5_raster)[layer_id], tmp[y, ], xout = extracted_data$bird_track_data$times[y])$y))
+    ret <- unlist(lapply(1:nrow(tmp), function(y) approx(time(era5_raster)[layer_id], tmp[y, ], xout = extracted_data$track_data$times[y])$y))
     return(ret)
   }))
   names(trilinear_data) <- as.vector(apply(layers_to_process, 1, paste0, collapse = "_"))
   
   # Calculate U and V wind components
   wind_data <- data.frame(
-    U_wind = unlist(lapply(1:nrow(trilinear_data), function(x) approx(trilinear_data[x, grep("z_", names(trilinear_data))] / 9.80665, trilinear_data[x, grep("u_", names(trilinear_data))], xout = extracted_data$bird_track_data$heights[x])$y)),
-    V_wind = unlist(lapply(1:nrow(trilinear_data), function(x) approx(trilinear_data[x, grep("z_", names(trilinear_data))] / 9.80665, trilinear_data[x, grep("v_", names(trilinear_data))], xout = extracted_data$bird_track_data$heights[x])$y))
+    U_wind = unlist(lapply(1:nrow(trilinear_data), function(x) approx(trilinear_data[x, grep("z_", names(trilinear_data))] / 9.80665, trilinear_data[x, grep("u_", names(trilinear_data))], xout = extracted_data$track_data$heights[x])$y)),
+    V_wind = unlist(lapply(1:nrow(trilinear_data), function(x) approx(trilinear_data[x, grep("z_", names(trilinear_data))] / 9.80665, trilinear_data[x, grep("v_", names(trilinear_data))], xout = extracted_data$track_data$heights[x])$y))
   )
   
   # Combine the input data and calculated wind components
-  wind_data <- cbind(extracted_data$bird_track_data, wind_data)
+  wind_data <- cbind(extracted_data$track_data, wind_data)
   
   return(wind_data)
 }
