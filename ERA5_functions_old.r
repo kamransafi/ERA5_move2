@@ -8,16 +8,15 @@ library(plyr)
 library(doMC)
 library(data.table)
 
-# Function to be used in following function, to define the area for CDS API
-# this function takes either bbox object or a vector of 4 numeric values (in order long min max and lat min max)
+# Function to define the area for CDS API
 area2request <- function(x, ext = 0.01) {
   #check if the input is a bbox
   if(!is(x, "bbox")){
     bounds <- x
   }
-  #check whether the input is a vector of length 4 
+  #check whether the input is a vector of length 4
   if(is(x, "numeric") && length(x) == 4){
-    bounds <- data.frame(xmin = x[1], xmax = x[2],  ymin = x[3], ymax = x[4])
+    bounds <- data.frame(xmin = x[1],  ymin = x[3], xmax = x[2], ymax = x[4])
   }
   #area: [north, west, south, east]
   x_range <- bounds$xmax - bounds$xmin
@@ -33,74 +32,22 @@ area2request <- function(x, ext = 0.01) {
   return(paste(north, west, south, east, sep="/"))
 }
 
-# Function to be used in following function, to generate request table from date range
-# x is the timestamp column, and unit is for the request (daily request or monthly request)
+# Function to generate request table from date range
 # For each timestamp, request data for the hour before and after (e.g. for 12:40:00, request data at 12:00:00 and 13:00:00 of that day)
-date2request <- function(x, unit = c("day","month")) {
+date2request <- function(x) {
   DateTime <- sort(unique(c(floor_date(x, "hour"), floor_date(x+3600, "hour"))))
-  reqTable <- data.frame(year=year(DateTime), month=sprintf("%02d", month(DateTime)), days=sprintf("%02d", day(DateTime)), hour=sprintf("%02d",hour(DateTime)))
-  if(unit=="day"){
-    #split the table into a list with all the observations with the same year, month, day
-    reqTable <- split(reqTable, apply(reqTable[,1:3], 1, paste0, collapse=""))
-    #collapse to one line per day
-    reqTable <- do.call(rbind, lapply(reqTable, function(x) cbind(x[1,1:3], hours= paste0(x[,4], collapse=" "))))
-  }else if(unit == "month"){
-    #split the table into a list with all the observations with the same year and month
-    reqTable <- split(reqTable, apply(reqTable[,1:2], 1, paste0, collapse=""))
-    #collapse to one line per month
-    reqTable <- do.call(rbind, lapply(reqTable, function(x) cbind(x[1,1:2], days = paste0(unique(x[,3]), collapse=" "), hours = paste0(unique(x[,4]), collapse=" "))))
-  }
+  reqTable <- data.frame(year=year(DateTime), month=sprintf("%02d", month(DateTime)), day=sprintf("%02d", day(DateTime)), hour=sprintf("%02d",hour(DateTime)))
+  #split the table into a list with all the observations with the same year, month, day
+  reqTable <- split(reqTable, apply(reqTable[,1:3], 1, paste0, collapse=""))
+  #collapse to one line per day
+  reqTable <- do.call(rbind, lapply(reqTable, function(x) cbind(x[1,1:3], hours= paste0(x[,4], collapse=" "))))
   return(reqTable)
 }
-
-# Function that uses the above function to compile a request table
-# track can be either a move2 object or a data.frame (for a data.frame, the column names of time and coordinates need to be specified unless they fit the default of a Movebank dataframe)
-# It is flexible in terms of arranging the request by day or month
-# It also allows the user to select either a predefined area for the entire request ("bbox", useful to then stack the downloaded nc files) or to request different areas per time unit (smaller area downloaded)
-timeSpace2request <- function(track, 
-                              timeUnit = c("day","month"), 
-                              area = c("bbox", "perTimeUnit"),
-                              timeCol = "timestamp",
-                              coordsCol = c("location.long","location.lat")) {
-  # Extract time and split data by timeUnit
-  if(is(track, "move2")){time <- mt_time(track)}else if(is(track, "data.frame")){time <- track[,timeCol]}
-  timeTable <- date2request(x = time, unit = timeUnit)
-  # if user selects bbox, the bbox of the entire track is used in the request
-  if(area == "bbox"){
-    if(is(track, "move2")){x <- st_bbox(track)}else if(is(track, "data.frame")){
-      x <- c(min(track[,coordsCol[1]], na.rm=T), 
-             max(track[,coordsCol[1]], na.rm=T), 
-             min(track[,coordsCol[2]], na.rm=T), 
-             max(track[,coordsCol[2]], na.rm=T))
-    }
-    area <- area2request(x)
-    reqTable <- cbind(timeTable, area)
-  }else # if user selects "perTimeUnit", the function goes through the timeTable and defines a different bbox per time unit
-    if(area == "perTimeUnit"){
-    reqTable <- as.data.frame(rbindlist(lapply(1:nrow(timeTable), function(i){
-      dayRange <- range(as.numeric(unlist(strsplit(timeTable[i,"days"]," "))))
-      minDate <- as.Date(paste(c(timeTable[i,1],timeTable[i,2],dayRange[1]),collapse="-"), tz="UTC")
-      maxDate <- as.Date(paste(c(timeTable[i,1],timeTable[i,2],dayRange[2]),collapse="-"), tz="UTC")
-      sub <- track[date(time) >= minDate & date(time) <= maxDate,]
-      if(is(sub, "move2")){x <- st_bbox(sub)}else if(is(sub, "data.frame")){
-        x <- c(min(sub[,coordsCol[1]], na.rm=T), 
-               max(sub[,coordsCol[1]], na.rm=T), 
-               min(sub[,coordsCol[2]], na.rm=T), 
-               max(sub[,coordsCol[2]], na.rm=T))
-      }
-      area <- area2request(x)
-      return(cbind(timeTable[i,],area))
-    })))
-    }
-  # the area to download is added to the time table in both cases, so that dates and area come in the same request table
-  return(reqTable)
-}
-
 
 # Function to create a list of requests
 # I added a few arguments for additional flexibility in the request
-create_request_list <- function(reqTable,
-                                datasetName = c("reanalysis-era5-pressure-levels", "reanalysis-era5-single-levels"),
+create_request_list <- function(reqTable, areaS,
+                                datasetName = "reanalysis-era5-pressure-levels", #one of "reanalysis-era5-pressure-levels" or "reanalysis-era5-single-levels"
                                 vars = c("geopotential", "u_component_of_wind", "v_component_of_wind"),
                                 levels = c("500", "550", "600", "650", "700", "750", "775", "800", "825",
                                            "850", "875", "900", "925", "950", "975", "1000")) {
@@ -112,19 +59,18 @@ create_request_list <- function(reqTable,
     levels <- levels
     ds <- "pressLev"}
   reqList <- lapply(seq_len(nrow(reqTable)), function(i) {
-    filename <- ifelse(nchar(reqTable$days[i])>2, paste0("download_ERA5_", reqTable$year[i], reqTable$month[i],"_",ds, ".nc"), paste0("download_ERA5_", reqTable$year[i], reqTable$month[i], reqTable$days[i],"_",ds, ".nc"))
     list(
       product_type = "reanalysis",
       variable = vars,
       pressure_level = levels,
       year = reqTable$year[i],
       month = reqTable$month[i],
-      day = unlist(strsplit(reqTable$days[i], " ")),
+      day = reqTable$day[i],
       time = unlist(lapply(strsplit(reqTable$hours[i], " "), paste, ":00", sep = "")),
-      area = reqTable$area[i],
+      area = areaS,
       format = "netcdf",
       dataset_short_name = datasetName,
-      target = filename
+      target = paste0("download_ERA5_", reqTable$year[i], reqTable$month[i], reqTable$day[i],"_",ds, ".nc")
     )
   })
   return(reqList)
@@ -197,8 +143,7 @@ send_requests <- function(reqList, localPath, user, batch_size, requestFileName=
   message(paste("Total files downloaded:", length(dld_requests)))
 }
 
-#______
-##### Important note! From here on works with daily files, but not yet tested for monthly downloads!
+
 # Function to extract relevant data from the bird track and ERA5 file
 ## Change the function to accept move2 or data.frame as input ##
 extract_track_and_era5_data <- function(track, era5_file, 

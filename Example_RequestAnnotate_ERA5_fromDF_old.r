@@ -39,12 +39,17 @@ wf_set_key(user = CDS_USER_ID,
 localPath <- "ERA5_downloads"
 if (!dir.exists()) dir.create(localPath)
 
-### Create an era5 request table for the track, specifying the dates and the area of each request
-# In this case we want monthly request for the entire area (bbox) covered by our dataset
-# the function takes either a move2 object or a data.frame (for a data.frame, the column names of time and coordinates need to be specified unless they fit the default of a Movebank dataframe)
-reqTable <- timeSpace2request(finalDf, timeUnit = "month", area = "bbox",
-                              timeCol = "timestamp",
-                              coordsCol = c("location.long","location.lat"))
+### Set the request area
+# this function takes either bbox object or a vector with 
+# optional modification on the function. Add an optional argument coords to specify long and lat columns, that we can use to extract the bbox from a dataframe
+areaS <- area2request(c(min(Track$location.long, na.rm=T), 
+                        max(Track$location.long, na.rm=T), 
+                        min(Track$location.lat, na.rm=T), 
+                        max(Track$location.lat, na.rm=T)))
+
+### Create the requests for the track
+# this function takes the timestamp column
+reqTable <- date2request(Track$timestamp)
 print(paste("Number of days to be requested:", nrow(reqTable)))
 
 ### With this function we can download either single level products or pressure level products, e.g.
@@ -57,27 +62,25 @@ vars_singleLev <- c("2m_temperature", "boundary_layer_height", "instantaneous_mo
 vars_pressLev <- c("Geopotential", "Specific humidity", "Temperature", "u_component_of_wind" , "v_component_of_wind")
 levels <- c("650", "750", "850", "900", "950", "1000")
 
-# Create two separate requests for the surface variables and the pressure levels variables
-# Each element of each list contains monthly requests
-reqList_pressLev <- create_request_list(reqTable, 
-                                        datasetName = "reanalysis-era5-pressure-levels",
-                                        vars = vars_pressLev, 
-                                        levels = levels)
-reqList_singleLev <- create_request_list(reqTable,
-                                         datasetName = "reanalysis-era5-single-levels",
+### Create two separate requests for the surface variables and the pressure levels variables
+reqList_pressLev <- create_request_list(reqTable, areaS, datasetName = "reanalysis-era5-pressure-levels",
+                                        vars = vars_pressLev, levels = levels)
+reqList_singleLev <- create_request_list(reqTable, areaS, datasetName = "reanalysis-era5-single-levels",
                                          vars = vars_singleLev)
 
 # remove partial downloads
 unlink(list.files(localPath, pattern="ecmwf", full.names = TRUE))
 # check for existing files and remove corresponding existing requests from the request list
-existing_files <- list.files(localPath, pattern = "^download_ERA5_.*\\pressLev.nc$", full.names = TRUE)
+existing_files <- list.files(localPath, pattern = "^download_ERA5_.*\\.nc$", full.names = TRUE)
 reqList_pressLev <- reqList_pressLev[!vapply(reqList_pressLev, function(req) file.path(localPath, req$target) %in% existing_files, FUN.VALUE = logical(1))]
-# existing_files <- list.files(localPath, pattern = "^download_ERA5_.*\\singleLev.nc$", full.names = TRUE)
-# reqList_singleLev <- reqList_singleLev[!vapply(reqList_singleLev, function(req) file.path(localPath, req$target) %in% existing_files, FUN.VALUE = logical(1))]
+reqList_singleLev <- reqList_singleLev[!vapply(reqList_singleLev, function(req) file.path(localPath, req$target) %in% existing_files, FUN.VALUE = logical(1))]
 
 print(paste("Number of total requests to be submitted:", length(reqList_singleLev)))
 
 ### Adjust the timeout option of curl in case of internet connection problems
+options(timeout = 20000)
+library(httr)
+set_config(config(timeout = 300))
 library(curl)
 handle <- new_handle() ## curl::curl_options()
 handle_setopt(handle, .list = list(connecttimeout = 300, timeout = 900))
