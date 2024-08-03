@@ -1,8 +1,8 @@
 # Main execution
-#source(".../ERA5_functions.r")
+#source(".../ERA5_functionsKSV0.1.r")
 #Your userID for the Copernicus Climate Data Store
 #This assumes that you have stored your credentials with the wf_set_key() function (see readme).
-CDS_USER_ID <- "310914"
+CDS_USER_ID <- "....."
 
 # ID of the study in movebank or a study name needed for movebank_download_study but also for naming the data folder
 studyID <- 24442409 

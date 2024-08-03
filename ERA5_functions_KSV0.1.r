@@ -62,6 +62,7 @@ library(data.table)
   return(reqTable)
 }
 
+#We still need to adjust the track to be either a move2 object or an sf object and a timestamp plus catching the errors
 
 ERA5request <- function(track, 
                         timeUnit = c("day", "week", "month"), 
