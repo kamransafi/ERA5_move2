@@ -1,18 +1,18 @@
 # Main execution
-source(".../ERA5_functions.r")
+#source(".../ERA5_functions.r")
 #Your userID for the Copernicus Climate Data Store
 #This assumes that you have stored your credentials with the wf_set_key() function (see readme).
-CDS_USER_ID <- "..."
+CDS_USER_ID <- "310914"
 
 # ID of the study in movebank or a study name needed for movebank_download_study but also for naming the data folder
 studyID <- 24442409 
 # ID of the local tag in movebank needed for the move2 function
 localID <- "3029" 
 #Local folder where all the ERA5 data and the track as Track.rds will be stored
-Local_path <- paste(".../Data/Study", studyID, sep="")
+Local_path <- paste(getwd(), studyID, sep="")
 
 #if the directory hasn't been created yet, create it
-if (!dir.exists()) dir.create(Local_path)
+if (!dir.exists(Local_path)) dir.create(Local_path)
 
 ### This part can/should be adjusted to your needs in regard to the movement data that you want to annotate ###
 # What is important that at the end there is a Track.rds file stored in the Local_path
@@ -21,7 +21,7 @@ if (!dir.exists()) dir.create(Local_path)
 # here I use the movebank_download_study function to download the movement data from movebank with no further adjustments
 
 # check if movement data has been stored in the working directory and skip downloading from movebank if it has
-if (!file.exists(paste(Local_path, Track.rds, sep="/"))) {
+if (!file.exists(paste(Local_path, "Track.rds", sep="/"))) {
   # Load data from a study from movebank
   Track <- movebank_download_study(
     study_id = studyID,
@@ -35,28 +35,35 @@ if (!file.exists(paste(Local_path, Track.rds, sep="/"))) {
   Track <- readRDS(file = file.path(Local_path, "Track.rds"))
 }
 ### End of the part that can/should be adjusted ###
+#check for error message, should throw an error
+#reqTable <- ERA5request(Track, timeUnit = "day", area="byTimeUnit", area_ext = 0.01)
+Traj <- Track[!st_is_empty(Track$geometry),]
+#this one should work
+t0 <- Sys.time()
+reqTable <- ERA5request(Traj, timeUnit = "day", area="byTimeUnit", area_ext = 0.01)
+difftime(Sys.time(), t0, units =  "secs")
+# t0 <- Sys.time()
+#reqTable <- ERA5request(Traj, timeUnit = "month", area="byTimeUnit", area_ext = 0.01)
+# difftime(Sys.time(), t0, units =  "secs")
 
-
-
-# set the request area based on the movement data
-# this function takes either bbox object or a vector with 
-# c(min(Track$Lon, na.rm=T), max(Track$Lon, na.rm=T), min(Track$Lat, na.rm=T), max(Track$Lat, na.rm=T))
-areaS <- area2request(st_bbox(Track))
-
-# create the requests for the track
-# this function takes the timestamp column
-reqTable <- date2request(Track$timestamp)
-print(paste("Number of days to be requested:", nrow(reqTable)))
+print(paste("Number of requests:", nrow(reqTable)))
+if(!file.exists(paste(Local_path, "requestTable.csv", sep="/"))){fwrite(reqTable, paste(Local_path, "requestTable.csv", sep="/"))}
+requests <- create_request_list(reqTable, dataset="ERA5 hourly data on pressure levels", 
+                               vars=c("geopotential", "u_component_of_wind", "v_component_of_wind"), 
+                               levels = c("500", "550", "600", "650", "700", "750", "775", 
+                                          "800", "825", "850", "875", "900", "925", "950", "975", "1000"))
 
 # check for existing files and remove corresponding existing requests from the request list
-existing_files <- list.files(localPath, pattern = "^download_ERA5_.*\\.nc$", full.names = TRUE)
-reqList <- create_request_list(reqTable, areaS)
-reqList <- reqList[!vapply(reqList, function(req) file.path(localPath, req$target) %in% existing_files, FUN.VALUE = logical(1))]
-print(paste("Number of total requests to be submitted:", length(reqList)))
+existing_files <- list.files(Local_path, pattern = "^ERA5_.*\\.nc$", full.names = TRUE)
+reqTable$file_exists <- vapply(requests, function(req) file.path(Local_path, req$target) %in% existing_files, FUN.VALUE = logical(1))
+fwrite(reqTable, paste(Local_path, "requestTable.csv", sep="/"))
+#check for which are already downloaded
+Requests2Send <- requests[!reqTable$file_exists]
+print(paste("Number of total requests to be submitted:", length(Requests2Send)))
 # remove partial downloads
-unlink(list.files(localPath, pattern="ecmwf", full.names = TRUE))
+unlink(list.files(Local_path, pattern="ecmwf", full.names = TRUE))
 
 # Submit requests to CDS API based on the list of requests
-send_requests(reqList, localPath, user=CDS_USER_ID, batch_size = 20)
-
-
+t0 <- Sys.time()
+send_requests(Requests2Send, localPath=Local_path, user=CDS_USER_ID, batch_size = 25)
+difftime(Sys.time(), t0, units =  "hours") + 12.25426
