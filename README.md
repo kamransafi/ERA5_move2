@@ -8,9 +8,9 @@ This package provides a framework for downloading environmental data from ERA5 r
 
 Before using this package, you need to:
 
-1. Register with the Copernicus Climate Data Store (CDS): https://cds.climate.copernicus.eu/user/register
-2. Set up your CDS API key following the guidelines at: https://cran.r-project.org/web/packages/ecmwfr/vignettes/cds_vignette.html
-3. Store your API key using the ecmwfr package (see documentation)
+1. Register with the Copernicus Climate Data Store (CDS): https://cds.climate.copernicus.eu
+2. Set up your CDS API key in CDS under "Your Profile".
+3. Store your API key using the ecmwfr package version > 2.0.0 (see documentation)
 4. Note that you need to agree to the user agreement and licences. Go to the CDS website and log in to accept the terms under "Your Profile", where you find the "Licences" tab
 
 For working with Movebank data, the move2 package uses keyring to store credentials. See https://bartk.gitlab.io/move2/articles/movebank.html for details on storing credentials.
@@ -28,7 +28,7 @@ The download process uses a robust framework that handles API rate limits, autom
 ### Step 1: Create a Request Table
 
 The ERA5request function examines your tracking data and creates a structured request table based on:
-- Temporal units: How to divide the temporal extent (daily, weekly, or monthly files)
+- Temporal units: How to divide the temporal extent (daily, weekly, or monthly files). Note that the data requested are hourly data, however the files contain data for a specific spatio-temporal extent (the extent of your data and in batches of one day, one week, or one month)
 - Area handling: Whether to use a single bounding box or separate ones for each time unit
 - Area extension: How much to extend the bounding box beyond tracking locations
 - Variables: Which ERA5 variables to download
@@ -104,7 +104,7 @@ Files are downloaded with a naming convention:
 
 ## Part Two: Annotating Tracking Data (Annotate_ERA5.r)
 
-The annotation process interpolates ERA5 variables to your tracking locations in three dimensions:
+The annotation process interpolates ERA5 variables to your tracking locations in three dimensions and in time:
 1. Spatial interpolation (horizontal)
 2. Temporal interpolation
 3. Vertical interpolation (for pressure level data)
@@ -120,9 +120,10 @@ The Annotate_ERA5.r script:
 
 This process adds environmental variables to each tracking location, handling:
 - Tracking data from move2 objects or data frames
-- Multiple file formats (daily, weekly, or monthly)
+- Multiple file formats (daily, weekly, or monthly batches)
 - Wind components and other variables
-- Vertical interpolation based on tracking altitude
+- Vertical interpolation based on the **altitude of the location data** as well as the **pressure level data** 
+  for the appropriate heights and based on the **geopotential height**. 
 
 ## Key Features
 
