@@ -1,39 +1,97 @@
-# ERA5_move2
-Code to download and annotate U and V Wind for move2 object class
+# ERA5_move2 new CDS API
 
-Before running the code, please check: https://cran.r-project.org/web/packages/ecmwfr/vignettes/ads_vignette.html
+## Code to Download and Annotate ERA5 Reanalysis Data for move2 Object Class
 
-It is important to know that the code requires a registration with the Copernicus Climate Data Store (CDS) to download the data. The registration is free and can be done here: https://cds.climate.copernicus.eu/user/register
-The data is requested through the ADS (atmospheric data store) API, which requires an API key. The API key can be obtained after registration and is used to authenticate the user. The API key should be stored using the keyring packages and the ecmwfr package using the wf_set_key() function. 
+This package provides a framework for downloading environmental data from ERA5 reanalysis through the Copernicus Climate Data Store (CDS) API and annotating movement data with these variables. It supports both pressure level data (e.g., wind at different altitudes) and single level data (e.g., surface wind, temperature).
 
-Likewise, the move2 package stores the credentials to movebank.org using the keyring package. The credentials are used to authenticate the user and allow the user to upload data to Movebank. See movebank_store_credentials("username") and the following vignette: https://bartk.gitlab.io/move2/articles/movebank.html
+## Prerequisites
 
-The code is divided into two parts:
-1. Download the data based on a move2 object.
-2. Annotate the data stored locally in a folder based on a move2 object stored in the same folder locally.
+Before using this package, you need to:
 
-Part One: Download.
-The downloads from CDS can and probably will fail. The CDS API is finicky, the internet is so too, and it will take some time. What the request ERA5 code does is to send a maximum of 20 concurrent requests (can be set as option 'batch_size' to the function 'send_requests') to CDS.  Each request can be either requesting data for a 'day', a 'week', or a 'month' and can either be for single layers or for various pressure levels. 
+1. Register with the Copernicus Climate Data Store (CDS): https://cds.climate.copernicus.eu/user/register
+2. Set up your CDS API key following the guidelines at: https://cran.r-project.org/web/packages/ecmwfr/vignettes/cds_vignette.html
+3. Store your API key using the ecmwfr package (see documentation)
+4. Note that you need to agree to the user agreement and licences. Go to the CDS website and log in to accept the terms under "Your Profile", where you find the "Licences" tab
 
-The download begins with starting a request table based on the spatial data for which the requests is supposed to be made, and based on the choice of how to split the spatial-temporal structure of the requests. For that, the function 'ERA5request' is used. It takes the options 'track', which must be a spatial object, 'timeUnit', which can be "day", "week", or "month" and 'area' which can be "byTimeUnit" or "complete". The option 'area_ext' sets the increase in area where a value of 0.01 would increase the bounding boxes by 1% in each direction. 
+For working with Movebank data, the move2 package uses keyring to store credentials. See https://bartk.gitlab.io/move2/articles/movebank.html for details on storing credentials.
 
-The next step is to create the CDS request table based on the previous table and choosing what data should be requested for those dates and areas. The 'create_request_list' function takes a list made by the function 'ERA5request' and allows to choose between the 'dataset' being 'ERA5 hourly data on single level' and 'ERA5 hourly data on pressure levels' (currently). The options are 'vars' and 'levels' which depend on the choice of 'dataset'. This nomenclature is taken from CDS to make it easier to see what variables and levels either of the two datasets provide for download. 
+## Workflow Overview
 
-Depending on the track, there might be many requests to send. When a request was completed in CDS, a ncdf file is downloaded. The files will be downloaded with a specific file naming convention. The files are called ERA5_ followed by 'pl' or 'sl' for pressure level or single level and then the date conveys the time requets. For daily data the format of the date will be 8 digits for %Y%m%d, for weekly data the format will be 10 digits/characters %Y%mCW%W, and finally for monthly data the format would be 6 digits %Y%m. These files will be stored locally. 
+The package workflow is divided into two main parts:
+1. **Download**: Request and download ERA5 data based on your tracking data's spatial and temporal extent (Request_ERA5.r)
+2. **Annotate**: Process the downloaded ERA5 data to extract environmental variables at each tracking location (Annotate_ERA5.r)
 
-The function that handles the sending and downloading completed requests to CDS is 'send_requests'. This function takes as options 'localPath', which is the folder path where all the data will be stored and also expected to be found when reinitiating requests. Furthermore 'user' refers to the user ID for CDS and finally 'batch_size' refers to how many requests can CDS handle for you at a time. Here, the recommendation is not to go over 40, better stay at somewhere like 20. Queueing more requests on CDS will not speed up your downloads, it will only make CDS lower your max number of requests you can send. 
+## Part One: Downloading ERA5 Data (Request_ERA5.r)
 
-If many requests have to be sent, chance are that the connection dies, or something else fails in CDS. Thus it is possible to rerun the code to resume the download of ERA 5 ncdf files. The code will check which raster files are already downloaded and skip the download of already obtained data if the corresponding file is already present in the folder indicated in localPath. The code will also check if a file is not fully downloaded and re-download the file if it is only partially downloaded. 
+The download process uses a robust framework that handles API rate limits, automatically resumes interrupted downloads, and organizes requests efficiently.
 
-In the example script 'Request_ERA5.r' there is data downloaded from movebank. The idea is that prior to requesting data from CDS, the movement data can also be manipulated, filtered, subset etc. What is important is that there is a folder where all the requested daily wind data and a file called 'Track.rds' as well as 'requestTable.csv' are stored. The Track.rds file is a move2 object (we are working on sf and timestamp) that contains the spatio-temporal data that will eventually be annotated with the wind data. 
+### Step 1: Create a Request Table
 
-The downloaded ncdf files for a 'complete' bounding box can be used for visualisations of the movement data in the larger context given by the bounding box of the movement data. The ncdf files can be read using the raster package and visualised using the rasterVis package. Or used for animations. Note that the days and hours requested and obtained are set by the tracking data. For animations maybe the requests should also include days and hours that are not covered by the tracking data.
+The ERA5request function examines your tracking data and creates a structured request table based on:
+- Temporal units: How to divide the temporal extent (daily, weekly, or monthly files)
+- Area handling: Whether to use a single bounding box or separate ones for each time unit
+- Area extension: How much to extend the bounding box beyond tracking locations
 
-Part Two: Annotate.
-The code starts with reading the Track.rds file and then reads the wind data from the folder. The wind data is then annotated to the coordinates contained in the move2 object using time and height above ellipsoid. The annotated data is then exported in a csv file in the same folder as the wind data. The output will contain event_id (the ID of the move2 object or the data frame), time, longitude, latitude, altitude, U and V wind. This code uses parallel processing to speed up the annotation process. The number of cores used can be set in the code (currently it is number of cores - 1). The annotation does a bilinear interpolation in horizontal space, then annotate linearly in time and finally also do a linear interpolation in height based on the geopotential height at the specified place and time. 
+### Step 2: Create Formatted Request List
 
-Future: 
-1. *DONE* The code could be made more generic by allowing to submit non move2 objects most likely a data frame with EventID, X and Y coordinates, time and altitude, for which the area2request, date2request and extract_track_and_era5_data would require adjustment to allow distinguishing between receiving a move2 or a data frame object. 
-2. What could be done in the future is to allow for more ERA5 products to be processed. The code is currently set up to download U, V and Z. The Z is used to interpolate the height above ellipsoid to height above sea level. The code could be extended to download other variables such as temperature, humidity, etc. and interpolate these as well. 
-3. The code could also be extended to allow for more complex interpolation methods. 
-4. The code could also be extended to allow for more complex filtering of the movement data. 
+The create_request_list function converts the request table into properly formatted API requests for:
+- Dataset type: "ERA5 hourly data on pressure levels" or "ERA5 hourly data on single level"
+- Variables: Wind components, geopotential height, temperature, etc.
+- Pressure levels: For pressure level data, specify which levels to download
+
+### Step 3: Send Requests and Download Data
+
+The send_requests function handles:
+- Submitting requests to the CDS API
+- Monitoring request status
+- Downloading completed files
+- Handling rate limits with exponential backoff
+- Automatic retries for failed downloads
+- Tracking progress and resuming interrupted downloads
+
+Files are downloaded with a naming convention:
+- ERA5_pl_YYYYMMDD.nc for daily pressure level data
+- ERA5_sl_YYYYMMDD.nc for daily single level data
+- ERA5_pl_YYYYMMCWWW.nc for weekly pressure level data (WW = week number)
+- ERA5_pl_YYYYMM.nc for monthly pressure level data
+
+## Part Two: Annotating Tracking Data (Annotate_ERA5.r)
+
+The annotation process interpolates ERA5 variables to your tracking locations in three dimensions:
+1. Spatial interpolation (horizontal)
+2. Temporal interpolation
+3. Vertical interpolation (for pressure level data)
+
+### Running the Annotation Process
+
+The Annotate_ERA5.r script:
+- Loads tracking data from a move2 object or data frame
+- Sets up parallel processing to speed up annotation
+- Loads ERA5 files and extracts relevant data for each tracking location
+- Performs multi-dimensional interpolation to match environmental data to exact tracking coordinates, timestamps, and heights
+- Combines results and saves them to file
+
+This process adds environmental variables to each tracking location, handling:
+- Tracking data from move2 objects or data frames
+- Multiple file formats (daily, weekly, or monthly)
+- Wind components and other variables
+- Vertical interpolation based on tracking altitude
+
+## Key Features
+
+1. **Flexible Data Handling**: Works with move2 objects or data frames with columns for EventID, coordinates, timestamp, and height
+2. **Robust Download Management**: Handles API rate limits, resumes interrupted downloads, and tracks progress
+3. **Efficient Processing**: Uses parallel processing to speed up annotation
+4. **Multi-dimensional Interpolation**: Interpolates variables in space, time, and height
+5. **Different Time Scales**: Supports daily, weekly, or monthly data organization
+
+## Future Development
+
+1. ✅ **Support for Generic Data Types**: The code now accepts both move2 objects and data.frames
+2. 🔄 **Additional ERA5 Variables**: Extend support for more ERA5 products beyond wind components (temperature, humidity, etc.)
+3. 🔄 **Advanced Interpolation Methods**: Implement more sophisticated interpolation algorithms
+4. 🔄 **Enhanced Data Filtering**: Develop more options for pre-processing movement data
+
+## Acknowledgments
+
+This package leverages the ecmwfr package for CDS API access and the move2 package for animal movement data handling.

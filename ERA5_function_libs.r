@@ -218,26 +218,31 @@ ERA5request <- function(track,
 #'   levels = c("500", "700", "850")
 #' )
 #' }
-create_request_list <- function(reqTable, dataset = c("ERA5 hourly data on single level", "ERA5 hourly data on pressure levels") , 
-                                vars = NULL, levels = NULL){
-  if(!unique(nchar(row.names(reqTable))) %in% c(6, 8)){stop("Your request table seems not to be correct. It is unclear whether you chose daily or monthly downloads.")}
-  if(unique(nchar(row.names(reqTable)))==6){
+create_request_list <- function(reqTable, dataset = c("ERA5 hourly data on single level", "ERA5 hourly data on pressure levels"),
+                                vars = NULL, levels = NULL) {
+  # Check for weekly format explicitly (contains "CW")
+  is_weekly <- any(grepl("CW", row.names(reqTable)))
+  
+  if(is_weekly) {
+    message("Requested ERA5 data at a level of 1 week of data per request!")
+  } else if(all(unique(nchar(row.names(reqTable))) == 6)) {
     message("Requested ERA5 data at a level of 1 month of data per request!")
-  }
-  if(unique(nchar(row.names(reqTable)))==8){
+  } else if(all(unique(nchar(row.names(reqTable))) == 8)) {
     message("Requested ERA5 data at a level of 1 day of data per request!")
+  } else {
+    stop("Your request table seems not to be correct. Row names should follow patterns for daily (YYYYMMDD), weekly (YYYYMMCWWW), or monthly (YYYYMM) requests.")
   }
-  if(dataset=="ERA5 hourly data on single level"){
+  
+  if(dataset == "ERA5 hourly data on single level") {
     message(paste0("Creating the request list for ", nrow(reqTable), " requests for single level ERA5 data."))
     reqList <- .request_ERA5_single_level(reqTable, vars)  
   }
-  if(dataset=="ERA5 hourly data on pressure levels"){
+  if(dataset == "ERA5 hourly data on pressure levels") {
     message(paste0("Creating the request list for ", nrow(reqTable), " requests for pressure level ERA5 data."))
     reqList <- .request_ERA5_pressure_levels(reqTable, vars, levels)  
   }
   return(reqList)
 }
-
 
 #' Send ERA5 data requests and download results
 #'
