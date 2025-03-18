@@ -31,6 +31,53 @@ The ERA5request function examines your tracking data and creates a structured re
 - Temporal units: How to divide the temporal extent (daily, weekly, or monthly files)
 - Area handling: Whether to use a single bounding box or separate ones for each time unit
 - Area extension: How much to extend the bounding box beyond tracking locations
+- Variables: Which ERA5 variables to download
+#### Pressure level variables
+- `geopotential` - Geopotential height (default in the function)
+- `u_component_of_wind` - Eastward/zonal wind component (default in the function)
+- `v_component_of_wind` - Northward/meridional wind component (default in the function)
+- `temperature` - Air temperature
+- `specific_humidity` - Specific humidity
+- `relative_humidity` - Relative humidity
+- `divergence` - Wind divergence
+- `vorticity` - Vorticity (rotation of the wind field)
+- `potential_vorticity` - Potential vorticity
+- `vertical_velocity` - Vertical velocity (omega)
+- `ozone_mass_mixing_ratio` - Ozone concentration
+- `fraction_of_cloud_cover` - Cloud cover fraction
+- `specific_cloud_liquid_water_content` - Liquid water content in clouds
+- `specific_cloud_ice_water_content` - Ice content in clouds
+
+#### Default Pressure Levels
+The default pressure levels in the code are:
+```
+c("500", "550", "600", "650", "700", "750", "775", "800", "825", "850", "875", "900", "925", "950", "975", "1000")
+```
+However they can be requested from 1000hPa to 1hPa.
+
+#### Single Level Dataset Variables
+- `10m_u_component_of_wind` - Eastward wind component at 10m height (default in the function)
+- `10m_v_component_of_wind` - Northward wind component at 10m height (default in the function)
+- `2m_temperature` - Air temperature at 2m height (default in the function)
+- `2m_dewpoint_temperature` - Dewpoint temperature at 2m height
+- `mean_sea_level_pressure` - Atmospheric pressure at sea level
+- `surface_pressure` - Pressure at the surface
+- `total_precipitation` - Accumulated liquid and frozen water falling to Earth's surface
+- `convective_precipitation` - Accumulated convective precipitation
+- `snow_depth` - Depth of snow
+- `snowfall` - Accumulated snow (water equivalent)
+- `boundary_layer_height` - Height of the planetary boundary layer
+- `total_cloud_cover` - Fraction of sky covered by clouds
+- `low_cloud_cover` - Fraction of sky covered by low clouds
+- `medium_cloud_cover` - Fraction of sky covered by medium clouds
+- `high_cloud_cover` - Fraction of sky covered by high clouds
+- `surface_solar_radiation_downwards` - Solar radiation reaching the surface
+- `surface_thermal_radiation_downwards` - Thermal radiation reaching the surface
+- `surface_sensible_heat_flux` - Transfer of heat through air movement
+- `surface_latent_heat_flux` - Heat transfer through evaporation
+- `soil_temperature_level_1` - Soil temperature near surface (0-7cm)
+- `volumetric_soil_water_layer_1` - Soil moisture near surface (0-7cm)
+
 
 ### Step 2: Create Formatted Request List
 

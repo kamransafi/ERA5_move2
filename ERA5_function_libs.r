@@ -272,6 +272,12 @@ create_request_list <- function(reqTable, dataset = c("ERA5 hourly data on singl
 #' download_stats <- send_requests(reqs, localPath = "data/ERA5")
 #' }
 send_requests <- function(reqList, localPath, batch_size = 25, max_retries = 3) {
+  # Initialize consecutive error tracking for progressive backoff
+  consecutive_errors <- 0
+  max_consecutive_errors <- 10
+  base_wait_time <- 30  # seconds
+  current_wait_time <- base_wait_time
+  
   # Remove the requests that have already been downloaded
   pattern <- "^ERA5_.*\\.nc$"  # You might need to adjust this pattern
   existing_files <- list.files(localPath, pattern = pattern, full.names = TRUE)
@@ -347,10 +353,24 @@ send_requests <- function(reqList, localPath, batch_size = 25, max_retries = 3) 
       }
     }
     
-    # Update the status of the live requests
+    # Update the status of the live requests - WITH ENHANCED ERROR HANDLING
     live_requests <- lapply(live_requests, function(x) {
       tryCatch({
-        return(x$update_status())
+        # First try to update the status
+        updated_x <- tryCatch({
+          x$update_status()
+        }, error = function(e) {
+          message(paste("Inner update error:", e$message))
+          return(NULL)  # Return NULL if inner update fails
+        })
+        
+        # Check if the result is NULL or has length zero before returning
+        if (is.null(updated_x) || length(updated_x) == 0) {
+          message("Received empty response from update_status(), maintaining previous state")
+          return(x)  # Return unchanged object
+        }
+        
+        return(updated_x)
       }, error = function(e) {
         if (grepl("rate limit", e$message, ignore.case = TRUE)) {
           message(paste("Rate limit reached during status check. Waiting", backoff_time, "seconds..."))
@@ -363,10 +383,29 @@ send_requests <- function(reqList, localPath, batch_size = 25, max_retries = 3) 
       })
     })
     
-    # Print current status values to help diagnose issues
+    # Print current status values with improved error handling
     current_statuses <- unlist(lapply(live_requests, function(x) {
-      tryCatch(x$get_status(), error = function(e) return("unknown"))
+      tryCatch({
+        status <- x$get_status()
+        if (is.null(status) || length(status) == 0) {
+          return("unknown")  # Return a default status when empty
+        }
+        return(status)
+      }, error = function(e) {
+        return("unknown")
+      })
     }))
+    
+    # Apply progressive backoff for connection issues
+    if (any(current_statuses == "unknown")) {
+      consecutive_errors <- consecutive_errors + 1
+      current_wait_time <- min(base_wait_time * 2^(consecutive_errors/3), 300)  # Cap at 5 minutes
+      message(paste("Consecutive errors:", consecutive_errors, "- Waiting", current_wait_time, "seconds"))
+    } else {
+      consecutive_errors <- max(0, consecutive_errors - 1)  # Gradually reduce count on success
+      current_wait_time <- base_wait_time
+    }
+    
     if(length(current_statuses) > 0) {
       message(paste("Current status values:", paste(unique(current_statuses), collapse=", ")))
     }
@@ -414,8 +453,8 @@ send_requests <- function(reqList, localPath, batch_size = 25, max_retries = 3) 
         }
       }
       
-      message("\nWaiting for CDS for 30 seconds.")
-      Sys.sleep(30)
+      message("\nWaiting for CDS for", current_wait_time, "seconds.")
+      Sys.sleep(current_wait_time)
       message("------------------------------------------------\n")
     } else {
       message(paste("Found", length(dldList), "completed requests. Downloading..."))
@@ -472,6 +511,10 @@ send_requests <- function(reqList, localPath, batch_size = 25, max_retries = 3) 
       if(length(to_remove) > 0) {
         live_requests <- live_requests[-to_remove]
       }
+      
+      # Reset backoff time after successful downloads
+      consecutive_errors <- 0
+      current_wait_time <- base_wait_time
     }
     
     message(paste("Number of requests alive on CDS: ", length(live_requests)))
