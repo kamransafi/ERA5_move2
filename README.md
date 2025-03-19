@@ -102,8 +102,10 @@ Files are downloaded with a naming convention:
 - ERA5_pl_YYYYMMCWWW.nc for weekly pressure level data (WW = week number)
 - ERA5_pl_YYYYMM.nc for monthly pressure level data
 
-#### Downloads take time and patience is a virtue
-The download part is the most time consuming. You can interrupt the request_ERA5.r script and resume it later. The script will check which files are already downloaded and continue with the missing files. It will resume the process, checking for completed jobs and download them, submit new jobs. You can interrupt as needed, resume when back etc. Just source the Request_ERA5.r script again. As long as the 'Local_path' and the 'studyID' are the same and the folder exists containing the files in the folder, the script will resume. 
+#### Interrupting and resuming requests
+
+The download part is the most time consuming. You can interrupt the request_ERA5.r script and resume it later, just rerun the script. The script will check which files are already downloaded and continue with the missing files. It will resume the process, checking for completed jobs and download them, and accordingly submit new jobs, until all the jobs have been completed. You can interrupt as needed, resume when back etc., just source the Request_ERA5.r script on the same machine again. 
+
 ## Part Two: Annotating Tracking Data (Annotate_ERA5.r)
 
 The annotation process interpolates ERA5 variables to your tracking locations in three dimensions and in time:
