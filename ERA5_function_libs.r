@@ -332,7 +332,7 @@ send_requests <- function(reqList, localPath, batch_size = 25, max_retries = 3) 
             "success"
           }, error = function(e) {
             if (grepl("rate limit", e$message, ignore.case = TRUE)) {
-              message(paste("Rate limit reached. Waiting", backoff_time, "seconds before retrying..."))
+              message(paste("Rate limit reached. Waiting ", backoff_time, " seconds before retrying..."))
               Sys.sleep(backoff_time)
               backoff_time <- min(backoff_time * 2, max_backoff)  # Exponential backoff
               return("rate_limited")
@@ -373,7 +373,7 @@ send_requests <- function(reqList, localPath, batch_size = 25, max_retries = 3) 
         return(updated_x)
       }, error = function(e) {
         if (grepl("rate limit", e$message, ignore.case = TRUE)) {
-          message(paste("Rate limit reached during status check. Waiting", backoff_time, "seconds..."))
+          message(paste("Rate limit reached during status check. Waiting ", backoff_time, " seconds..."))
           Sys.sleep(backoff_time)
           backoff_time <- min(backoff_time * 2, max_backoff)
         } else {
@@ -400,7 +400,7 @@ send_requests <- function(reqList, localPath, batch_size = 25, max_retries = 3) 
     if (any(current_statuses == "unknown")) {
       consecutive_errors <- consecutive_errors + 1
       current_wait_time <- min(base_wait_time * 2^(consecutive_errors/3), 300)  # Cap at 5 minutes
-      message(paste("Consecutive errors:", consecutive_errors, "- Waiting", current_wait_time, "seconds"))
+      message(paste("Consecutive errors:", consecutive_errors, "- Waiting ", current_wait_time, " seconds"))
     } else {
       consecutive_errors <- max(0, consecutive_errors - 1)  # Gradually reduce count on success
       current_wait_time <- base_wait_time
@@ -453,7 +453,7 @@ send_requests <- function(reqList, localPath, batch_size = 25, max_retries = 3) 
         }
       }
       
-      message("\nWaiting for CDS for", current_wait_time, "seconds.")
+      message("\nWaiting for CDS for ", current_wait_time, " seconds.")
       Sys.sleep(current_wait_time)
       message("------------------------------------------------\n")
     } else {
