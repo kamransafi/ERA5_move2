@@ -167,7 +167,7 @@ ERA5request <- function(track,
 .request_ERA5_single_level <- function(reqTable,
                                        vars = c('10m_u_component_of_wind', '10m_v_component_of_wind', '2m_temperature')) {
   reqList <- lapply(seq_len(nrow(reqTable)), function(i) {
-    filename <- paste0("ERA5_sl_", rownames(reqTable[i,]), ".nc")
+    filename <- paste0("ERA5_sl_", rownames(reqTable[i,]), ".zip")
     list(
       product_type = "reanalysis",
       variable = vars,
@@ -941,8 +941,8 @@ annotate_era5_data <- function(extracted_data) {
   if (need_next_file && file.exists(file_nextPeriod)) {
     era5_nextPeriod <- terra::rast(file_nextPeriod)
     
-    # Concatenate rasters while preserving layer names
-    era5_raster <- c(era5_raster, era5_nextPeriod)
+    # merge rasters while preserving layer names
+    era5_raster <- terra:merge(era5_raster, era5_nextPeriod)
     
     # Filter layers where valid_time exceeds ceiling(max_timestamp + 1 hour)
     cutoff_time <- lubridate::ceiling_date(max_timestamp + lubridate::hours(1), "hour")
