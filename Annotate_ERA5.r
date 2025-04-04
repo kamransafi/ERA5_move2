@@ -41,7 +41,7 @@ extracted_data_list <- extracted_data_list[sapply(extracted_data_list, function(
 
 # Annotate with ERA5 environmental data in parallel
 start_time <- Sys.time()
-annotated_data_list <- llply(extracted_data_list, annotate_era5_data, .parallel = TRUE)
+annotated_data_list <- llply(extracted_data_list, annotate_era5_data, .parallel = F)
 end_time <- Sys.time()
 print(paste("Time taken for annotating with ERA5 data:", round(difftime(end_time, start_time, units = "mins"), 2), "minutes"))
 

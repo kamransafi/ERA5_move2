@@ -579,21 +579,35 @@ send_requests <- function(reqList, localPath, batch_size = 25, max_retries = 3) 
 #' based on date. It supports both move2 objects and data frames as input.
 #'
 #' @param track A move2 object or data frame containing tracking data
-#' @param era5_file Path to the ERA5 file
-#' @param eventCol Column name containing event IDs (default: "event.id")
+#' @param era5_file File name and path to the ERA5 file (the idea is to to loop through all the files)
+#' @param eventCol Column name containing event IDs (default: NULL)
 #'                 For move2 objects, will automatically check for "event_id" if "event.id" is not found
-#' @param timeCol Column name containing timestamps (default: "timestamp")
-#' @param coordsCol Column names containing coordinates (default: c("location.long","location.lat"))
-#' @param heightCol Column name containing height data (default: "height_above_ellipsoid")
+#' @param timeCol Column name containing timestamps (as POSIXct) in the data.frame (default: NULL)
+#'                For move2 objects, will automatically extract "timestamp"
+#' @param coordsCol Column names containing coordinates (in EPSG 4326) in the data.frame, vector of two strings (default: NULL)
+#'                For move2 objects, will automatically extract the coordinates from the geometry column
+#' @param heightCol Column name containing height data  in the data.frame (default: NULL)
 #'                  For move2 objects, will automatically check for "height.above.ellipsoid" if default not found
 #'
-#' @return A list containing ERA5 file information and matching location data
+#' @return A list containing:
+#' \itemize{
+#' \item \code{era5_file_name}: Name of the ERA5 file
+#' \item \code{dataset}: Dataset name extracted from file name
+#' \item \code{era5_date_start}: Start date of the ERA5 file
+#' \item \code{era5_date_end}: End date of the ERA5 file
+#' \item \code{file_type}: Type of ERA5 file (daily/weekly/monthly)
+#' \item \code{location_data}: Filtered tracking data with columns:
+#'    * event_id
+#'    * Long (longitude)
+#'    * Lat (latitude)
+#'    * timestamp
+#'    * heights (optional)
+#' }
 extract_locations_and_era5_data <- function(track, era5_file, 
                                             eventCol = "event.id",
                                             timeCol = "timestamp", 
                                             coordsCol = c("location.long","location.lat"), 
                                             heightCol = "height_above_ellipsoid") {
-  # Required packages
   requireNamespace("dplyr", quietly = TRUE)
   requireNamespace("lubridate", quietly = TRUE)
   
@@ -642,7 +656,7 @@ extract_locations_and_era5_data <- function(track, era5_file,
     }
     
     if (length(week_days) == 0) {
-      stop("Could not determine date range for week ", week_num, " in ", year, "-", month)
+      stop(paste0("Could not determine date range for week ", week_num, " in ", year, "-", month))
     }
     
     date_start <- min(week_days)
@@ -656,16 +670,16 @@ extract_locations_and_era5_data <- function(track, era5_file,
     date_start <- lubridate::ymd(paste0(year, "-", month, "-01"))
     date_end <- lubridate::ceiling_date(date_start, "month") - lubridate::days(1)
   } else {
-    stop("Unknown ERA5 file format: ", era5_filename)
+    stop(paste0("Unknown ERA5 file format: ", era5_filename))
   }
   
   # Filter tracking data based on the identified date range
   if (inherits(track, "move2")) {
-    # For move2 objects
     daily_track <- track %>%
       dplyr::filter(as.Date(timestamp) >= date_start & as.Date(timestamp) <= date_end)
+    
     if (nrow(daily_track) == 0) {
-      warning("No data found for date: ", era5_date)
+      warning(paste0("No data found for date range: ", date_start, " to ", date_end))
       return(NULL)
     }
     
@@ -679,17 +693,16 @@ extract_locations_and_era5_data <- function(track, era5_file,
       
       if (length(found_event_cols) > 0) {
         event_column <- found_event_cols[1]
-        message("Using '", event_column, "' as event ID column instead of '", eventCol, "'")
+        message(paste0("Using '", event_column, "' as event ID column instead of '", eventCol, "'"))
         event_id <- daily_track %>% dplyr::pull(!!event_column)
       } else {
-        warning("No event ID column found. Checked: ", paste(c(eventCol, alt_event_cols), collapse = ", "))
+        warning(paste0("No event ID column found. Checked: ", paste(c(eventCol, alt_event_cols), collapse = ", ")))
         event_id <- seq_len(nrow(daily_track))  # Fallback to row numbers if no event ID found
       }
     } else {
       event_id <- daily_track %>% dplyr::pull(!!event_column)
     }
     
-    # Handle different height column naming conventions in move2 objects
     height_column <- heightCol
     if (!height_column %in% available_cols) {
       alt_height_cols <- c("height_above_ellipsoid", "height.above.ellipsoid")
@@ -697,10 +710,10 @@ extract_locations_and_era5_data <- function(track, era5_file,
       
       if (length(found_height_cols) > 0) {
         height_column <- found_height_cols[1]
-        message("Using '", height_column, "' as height column instead of '", heightCol, "'")
+        message(paste0("Using '", height_column, "' as height column instead of '", heightCol, "'"))
         heights <- daily_track %>% dplyr::pull(!!height_column)
       } else {
-        warning("No height data found. Checked columns: ", paste(c(heightCol, alt_height_cols), collapse = ", "))
+        warning(paste0("No height data found. Checked columns: ", paste(c(heightCol, alt_height_cols), collapse = ", ")))
         heights <- rep(NA, nrow(daily_track))
       }
     } else {
@@ -711,20 +724,18 @@ extract_locations_and_era5_data <- function(track, era5_file,
     times <- mt_time(daily_track)
     
   } else if (inherits(track, "data.frame")) {
-    # For data.frames
     daily_track <- track %>%
       dplyr::filter(as.Date(!!dplyr::sym(timeCol)) >= date_start & 
                       as.Date(!!dplyr::sym(timeCol)) <= date_end)
     
     if (nrow(daily_track) == 0) {
-      warning("No data found for date: ", era5_date)
+      warning(paste0("No data found for date range: ", date_start, " to ", date_end))
       return(NULL)
     }
     
-    # Check if event column exists
     if (!eventCol %in% names(daily_track)) {
-      warning("Event ID column '", eventCol, "' not found in data frame.")
-      event_id <- seq_len(nrow(daily_track))  # Fallback to row numbers
+      warning(paste0("Event ID column '", eventCol, "' not found in data frame."))
+      event_id <- seq_len(nrow(daily_track))  
     } else {
       event_id <- daily_track[[eventCol]]
     }
@@ -732,18 +743,35 @@ extract_locations_and_era5_data <- function(track, era5_file,
     coords <- as.matrix(daily_track[, coordsCol])
     times <- daily_track[[timeCol]]
     
-    # Check if height column exists
     if (!heightCol %in% names(daily_track)) {
-      warning("No height data found. Height column '", heightCol, "' not found in data frame.")
+      warning(paste0("No height data found. Height column '", heightCol, "' not found in data frame."))
       heights <- rep(NA, nrow(daily_track))
     } else {
       heights <- daily_track[[heightCol]]
     }
   } else {
-    stop("Track must be a move2 object or a data.frame")
+    stop(paste0("Track must be a move2 object or a data.frame"))
   }
   
-  # Add file type information to results
+  location_data <- data.frame(
+    event_id = event_id,
+    Long = coords[, 1],
+    Lat = coords[, 2],
+    timestamp = times,
+    heights = heights
+  )
+  
+  location_data_required <- location_data %>%
+    dplyr::select(-heights)
+  
+  complete_indices <- complete.cases(location_data_required)
+  
+  if (!all(complete_indices)) {
+    warning(paste0("Removed ", sum(!complete_indices), " rows with missing required values (excluding heights)."))
+  }
+  
+  location_data <- location_data[complete_indices, ]
+  
   extracted_data <- list(
     era5_file_name = era5_file,
     dataset = era5_filename,
@@ -756,186 +784,44 @@ extract_locations_and_era5_data <- function(track, era5_file,
   return(extracted_data)
 }
 
-# extract_locations_and_era5_data <- function(track, era5_file, 
-#                                             eventCol = "event.id",
-#                                             timeCol = "timestamp", 
-#                                             coordsCol = c("location.long","location.lat"), 
-#                                             heightCol = "height_above_ellipsoid") {
-#   # Required packages
-#   requireNamespace("dplyr", quietly = TRUE)
-#   requireNamespace("lubridate", quietly = TRUE)
-#   
-#   # Extract the date from the ERA5 file name
-#   era5_filename <- basename(era5_file)
-#   date_part <- strsplit(era5_filename, "_")[[1]][3]
-#   era5_date <- lubridate::ymd(substr(date_part, 1, 8))
-#   
-#   # Extract data based on track type
-#   if (inherits(track, "move2")) {
-#     # For move2 objects
-#     daily_track <- track %>%
-#       dplyr::filter(as.Date(timestamp) == era5_date)
-#     
-#     if (nrow(daily_track) == 0) {
-#       warning("No data found for date: ", era5_date)
-#       return(NULL)
-#     }
-#     
-#     available_cols <- names(daily_track)
-#     
-#     # Handle different event ID column naming conventions in move2 objects
-#     event_column <- eventCol
-#     if (!event_column %in% available_cols) {
-#       alt_event_cols <- c("event.id", "event_id")
-#       found_event_cols <- alt_event_cols[alt_event_cols %in% available_cols]
-#       
-#       if (length(found_event_cols) > 0) {
-#         event_column <- found_event_cols[1]
-#         message("Using '", event_column, "' as event ID column instead of '", eventCol, "'")
-#         event_id <- daily_track %>% dplyr::pull(!!event_column)
-#       } else {
-#         warning("No event ID column found. Checked: ", paste(c(eventCol, alt_event_cols), collapse = ", "))
-#         event_id <- seq_len(nrow(daily_track))  # Fallback to row numbers if no event ID found
-#       }
-#     } else {
-#       event_id <- daily_track %>% dplyr::pull(!!event_column)
-#     }
-#     
-#     # Handle different height column naming conventions in move2 objects
-#     height_column <- heightCol
-#     if (!height_column %in% available_cols) {
-#       alt_height_cols <- c("height_above_ellipsoid", "height.above.ellipsoid")
-#       found_height_cols <- alt_height_cols[alt_height_cols %in% available_cols]
-#       
-#       if (length(found_height_cols) > 0) {
-#         height_column <- found_height_cols[1]
-#         message("Using '", height_column, "' as height column instead of '", heightCol, "'")
-#         heights <- daily_track %>% dplyr::pull(!!height_column)
-#       } else {
-#         warning("No height data found. Checked columns: ", paste(c(heightCol, alt_height_cols), collapse = ", "))
-#         heights <- rep(NA, nrow(daily_track))
-#       }
-#     } else {
-#       heights <- daily_track %>% dplyr::pull(!!height_column)
-#     }
-#     
-#     coords <- sf::st_coordinates(daily_track)
-#     times <- mt_time(daily_track)
-#     
-#   } else if (inherits(track, "data.frame")) {
-#     # For data.frames - use column names exactly as provided by user
-#     daily_track <- track %>%
-#       dplyr::filter(as.Date(!!dplyr::sym(timeCol)) == era5_date)
-#     
-#     if (nrow(daily_track) == 0) {
-#       warning("No data found for date: ", era5_date)
-#       return(NULL)
-#     }
-#     
-#     # Check if event column exists
-#     if (!eventCol %in% names(daily_track)) {
-#       warning("Event ID column '", eventCol, "' not found in data frame.")
-#       event_id <- seq_len(nrow(daily_track))  # Fallback to row numbers
-#     } else {
-#       event_id <- daily_track[[eventCol]]
-#     }
-#     
-#     coords <- as.matrix(daily_track[, coordsCol])
-#     times <- daily_track[[timeCol]]
-#     
-#     # Check if height column exists
-#     if (!heightCol %in% names(daily_track)) {
-#       warning("No height data found. Height column '", heightCol, "' not found in data frame.")
-#       heights <- rep(NA, nrow(daily_track))
-#     } else {
-#       heights <- daily_track[[heightCol]]
-#     }
-#   } else {
-#     stop("Track must be a move2 object or a data.frame")
-#   }
-#   
-#   # Create a list with the extracted data
-#   location_data <- data.frame(
-#     event_id = event_id,
-#     Long = coords[, 1],
-#     Lat = coords[, 2],
-#     timestamp = times,
-#     heights = heights
-#   )
-#   
-#   # Remove rows with missing values in required fields (but not heights)
-#   location_data_required <- location_data %>%
-#     dplyr::select(-heights)
-#   
-#   complete_indices <- complete.cases(location_data_required)
-#   if (!all(complete_indices)) {
-#     warning("Removed ", sum(!complete_indices), " rows with missing required values (excluding heights)")
-#   }
-#   
-#   location_data <- location_data[complete_indices, ]
-#   
-#   # Create result with a single consistent field name
-#   extracted_data <- list(
-#     era5_file_name = era5_file,
-#     dataset = era5_filename,
-#     era5_date = era5_date,
-#     location_data = location_data
-#   )
-#   
-#   return(extracted_data)
-# }
-
 #' Interpolate ERA5 data in time
 #'
 #' Helper function to perform temporal interpolation for ERA5 variables
 #'
 #' @param interpolated_in_space Data frame with spatially interpolated ERA5 variables
-#' @param layer_name Name of the layer (variable or variable+pressure level combination)
-#' @param location_timestamps Vector of POSIXct timestamps for each location
+#' @param extracted_data List containing location data and timestamps
 #'
 #' @return Data frame with temporally interpolated values
-.interpolate_in_time <- function(interpolated_in_space, layer_name, location_timestamps) {
-  # Get all columns for this layer across different times
-  layer_id <- grep(paste0("^", layer_name, "_valid_time="), names(interpolated_in_space))
-  
-  if (length(layer_id) == 0) {
-    warning("No matching columns found for layer: ", layer_name)
-    return(data.frame(rep(NA, nrow(interpolated_in_space))))
-  }
-  
-  # Extract the data for this layer
-  tmp <- interpolated_in_space[, layer_id, drop = FALSE]
-  
-  # Extract times for this layer
-  layer_times <- as.POSIXct(
-    as.numeric(gsub(".*valid_time=", "", names(tmp))),
-    origin = "1970-01-01", 
+.interpolate_in_time <- function(interpolated_inSpace, extracted_data) {
+  variable_names <- gsub("_valid_time=.*", "", names(interpolated_inSpace))
+  times <- as.POSIXct(
+    as.numeric(gsub(".*valid_time=([0-9]+).*", "\\1", names(interpolated_inSpace))),
+    origin = "1970-01-01",
     tz = "UTC"
   )
-  
-  # Ensure times are in chronological order
-  time_order <- order(layer_times)
-  layer_times <- layer_times[time_order]
-  tmp <- tmp[, time_order, drop = FALSE]
-  
-  # For each location, interpolate to the exact timestamp
-  ret <- data.frame(unlist(lapply(1:nrow(tmp), function(y) {
-    # Location timestamp
-    loc_time <- location_timestamps[y]
-    
-    # Values at all time steps for this location and layer
-    values <- as.numeric(tmp[y, ])
-    
-    # Interpolate to the exact timestamp
-    approx(x = layer_times, 
-           y = values, 
-           xout = loc_time, 
-           rule = 2)$y
-  })))
-  
-  names(ret) <- layer_name
-  return(ret)
+  df <- data.frame(vars = variable_names, time=times)
+  df_sorted <- df[order(df$vars, df$time), ]
+  layers <- unique(variable_names)
+  tInterpolate <-   lapply(layers, function(x) {
+    tmp <- interpolated_inSpace[, as.numeric(row.names(df_sorted[df_sorted$vars == x, ]))]
+    vals <- lapply(1:nrow(tmp), function(i){
+      layer_times <- as.POSIXct(
+        as.numeric(gsub(".*valid_time=([0-9]+).*", "\\1", names(tmp[i,]))),
+        origin = "1970-01-01",
+        tz = "UTC"
+      )
+      layer_values <- as.numeric(tmp[i,])
+      est <- approx(layer_times, layer_values, xout = extracted_data$location_data$timestamp[i])$y
+      return(est)
+      })
+    return(unlist(vals))
+    })
+  tInterpolate <- do.call(cbind, tInterpolate)
+  tInterpolate <- as.data.frame(tInterpolate)
+  names(tInterpolate) <- layers
+  return(tInterpolate)
 }
+
 
 #' Interpolate ERA5 pressure level data in height dimension
 #'
@@ -948,47 +834,42 @@ extract_locations_and_era5_data <- function(track, era5_file,
 #' @param variable_longname Long name for the output column (for labeling)
 #'
 #' @return Data frame with vertically interpolated values
-.interpolate_in_height <- function(interpolated_in_time, variable_name, location_heights, variable_longname) {
-  # Convert heights if they contain units in string format
-  if (is.character(location_heights)) {
-    location_heights <- as.numeric(gsub("\\s*\\[.*\\]", "", location_heights))
-  }
-  
+.interpolate_in_height <- function(interpolated_in_time) {
+  var_names <- unique(gsub("_pressure.*", "", names(interpolated_inTime)))
+  var_names <- var_names[!grepl("^z", var_names)]
+  location_heights <- interpolated_in_time$heights
   # For each location, interpolate the variable at its specific height
-  interpolated_var <- data.frame(unlist(lapply(1:nrow(interpolated_in_time), function(x) {
+  interpolated_var <- lapply(1:nrow(interpolated_in_time), function(x) {
     tryCatch({
       # Get geopotential heights by dividing by gravity constant (9.80665 m/s²)
       geopotential_heights <- interpolated_in_time[x, grep("^z_pressure_level=", names(interpolated_in_time))] / 9.80665
       
       # Get variable values at each pressure level - match the exact pattern in column names
-      var_values <- interpolated_in_time[x, grep(paste0("^", variable_name, "_pressure_level="), names(interpolated_in_time))]
-      
-      # Ensure values are sorted by height (important for interpolation)
-      pressure_levels <- as.numeric(gsub(".*pressure_level=([0-9]+)$", "\\1", names(interpolated_in_time)[grep(paste0("^", variable_name, "_pressure_level="), names(interpolated_in_time))]))
-      
-      # Target height for this location
-      target_height <- location_heights[x]
-      
-      # Skip interpolation if any values are NA
-      if (any(is.na(geopotential_heights)) || any(is.na(var_values)) || is.na(target_height)) {
-        return(NA)
-      }
-      
-      # Interpolate to the exact height
-      approx(
-        x = geopotential_heights,
-        y = var_values,
-        xout = target_height,
-        rule = 2  # rule=2 allows extrapolation if needed
-      )$y
-    }, error = function(e) {
-      warning("Height interpolation failed for location ", x, ": ", conditionMessage(e))
-      return(NA)
-    })
-  })))
-  
-  names(interpolated_var) <- variable_longname
-  return(interpolated_var)
+      ints <- lapply(var_names, function(var) {
+        var_values <- interpolated_in_time[x, grep(paste0("^", var, "_pressure_level="), names(interpolated_in_time))]
+        # Ensure values are sorted by height (important for interpolation)
+        pressure_levels <- as.numeric(gsub(".*pressure_level=([0-9]+)$", "\\1", names(interpolated_in_time)[grep(paste0("^", var, "_pressure_level="), names(interpolated_in_time))]))
+        
+        # Skip interpolation if any values are NA
+        if (any(is.na(geopotential_heights)) || any(is.na(var_values)) || is.na(target_height)) {
+          return(NA)
+        }
+        
+        # Interpolate to the exact height
+        ret <- approx(
+          x = geopotential_heights,
+          y = var_values,
+          xout = location_heights[x],
+          rule = 2  # rule=2 allows extrapolation if needed
+        )$y
+        return(ret)
+      })
+      df <- data.frame(t(unlist(ints)))
+      names(df) <- var_names
+      return(df)
+      })
+      })
+  return(rbindlist(interpolated_var))
 }
 
 
@@ -1006,8 +887,6 @@ extract_locations_and_era5_data <- function(track, era5_file,
 #'     \item era5_date: Date string for the ERA5 data
 #'     \item dataset: String indicating dataset type (includes "pl" for pressure level data)
 #'   }
-#' @param pathToFolder Optional. Path where the annotated data should be saved as RDS file.
-#'   If not provided, results will only be returned but not saved.
 #'
 #' @return A data frame containing the original location data augmented with interpolated 
 #'   environmental variables from ERA5 data.
@@ -1027,304 +906,85 @@ extract_locations_and_era5_data <- function(track, era5_file,
 #' # Annotate with ERA5 data
 #' annotated_tracks <- annotate_era5_data(data, "results/annotated")
 #' }
-annotate_era5_data <- function(extracted_data, pathToFolder) {
+annotate_era5_data <- function(extracted_data) {
   # Load ERA5 raster file
   era5_raster <- terra::rast(extracted_data$era5_file_name)
-  
-  # Determine file type and check for boundary cases
-  file_type <- extracted_data$file_type
-  need_next_file <- FALSE
   
   # Get the maximum timestamp in the location data
   max_timestamp <- max(extracted_data$location_data$timestamp)
   
-  # Handle boundary cases based on file type
+  # Determine if next period's file is needed
+  need_next_file <- FALSE
+  folder <- dirname(extracted_data$era5_file_name)
+  file_type <- extracted_data$file_type
   if (file_type == "daily") {
-    # For daily files, check for locations at 23:00
-    if (lubridate::hour(max_timestamp) == 23) {
-      need_next_file <- TRUE
-      next_date <- extracted_data$era5_date_end + lubridate::days(1)
-      folder <- dirname(extracted_data$era5_file_name)
-      file_nextPeriod <- file.path(folder, paste0("ERA5_pl_", format(next_date, "%Y%m%d"), ".nc"))
-    }
-  } 
-  else if (file_type == "weekly") {
-    # For weekly files, check if locations are at end of week
-    if (as.Date(max_timestamp) == extracted_data$era5_date_end && 
-        lubridate::hour(max_timestamp) >= 20) {
-      need_next_file <- TRUE
-      
-      # Calculate the start of the next week
-      next_date <- extracted_data$era5_date_end + lubridate::days(1)
-      next_year <- lubridate::year(next_date)
-      next_month <- lubridate::month(next_date)
-      next_week <- lubridate::week(next_date)
-      
-      # Handle potential month boundary crossing
-      folder <- dirname(extracted_data$era5_file_name)
-      file_nextPeriod <- file.path(folder, paste0("ERA5_pl_", 
-                                                  sprintf("%04d%02d", next_year, next_month), 
-                                                  "CW", sprintf("%02d", next_week), 
-                                                  ".nc"))
-    }
-  } 
-  else if (file_type == "monthly") {
-    # For monthly files, check if locations are at month end
-    if (as.Date(max_timestamp) == extracted_data$era5_date_end && 
-        lubridate::hour(max_timestamp) >= 20) {
-      need_next_file <- TRUE
-      
-      next_date <- lubridate::ceiling_date(extracted_data$era5_date_end, "month")
-      folder <- dirname(extracted_data$era5_file_name)
-      file_nextPeriod <- file.path(folder, paste0("ERA5_pl_", 
-                                                  format(next_date, "%Y%m"), 
-                                                  ".nc"))
-    }
+    next_date <- extracted_data$era5_date_end + lubridate::days(1)
+    file_nextPeriod <- file.path(folder, paste0("ERA5_pl_", format(next_date, "%Y%m%d"), ".nc"))
+    need_next_file <- TRUE
+  } else if (file_type == "weekly") {
+    next_date <- extracted_data$era5_date_end + lubridate::days(1)
+    next_year <- lubridate::year(next_date)
+    next_month <- lubridate::month(next_date)
+    next_week <- lubridate::week(next_date)
+    file_nextPeriod <- file.path(folder, paste0("ERA5_pl_", 
+                                                sprintf("%04d%02d", next_year, next_month), 
+                                                "CW", sprintf("%02d", next_week), 
+                                                ".nc"))
+    need_next_file <- TRUE
+  } else if (file_type == "monthly") {
+    next_date <- lubridate::ceiling_date(extracted_data$era5_date_end, "month")
+    file_nextPeriod <- file.path(folder, paste0("ERA5_pl_", format(next_date, "%Y%m"), ".nc"))
+    need_next_file <- TRUE
   }
   
-  # Load and process the next period's file if needed
-  if (need_next_file) {
-    if (!file.exists(file_nextPeriod)) {
-      warning("Data have locations at the period boundary. Next period file is not available.")
-    } else {
-      # Load next period's raster
-      era5_nextPeriod <- terra::rast(file_nextPeriod)
-      
-      # Extract time steps from the next period's file
-      nextperiod_times <- terra::time(era5_nextPeriod)
-      
-      # Filter time steps based on file type
-      if (file_type == "daily") {
-        # For daily, include only first hour of next day
-        nextperiod_times <- nextperiod_times[
-          as.Date(nextperiod_times) == as.Date(next_date) & 
-            lubridate::hour(nextperiod_times) <= 1
-        ]
-      } else {
-        # For weekly/monthly, include first day of next period
-        nextperiod_times <- nextperiod_times[
-          as.Date(nextperiod_times) == as.Date(next_date)
-        ]
-      }
-      
-      # Merge with main raster
-      if (length(nextperiod_times) > 0) {
-        era5_raster <- terra::merge(era5_raster, era5_nextPeriod[[nextperiod_times]])
-      }
-    }
+  # Load and concatenate the next period's raster file if needed
+  if (need_next_file && file.exists(file_nextPeriod)) {
+    era5_nextPeriod <- terra::rast(file_nextPeriod)
+    
+    # Concatenate rasters while preserving layer names
+    era5_raster <- c(era5_raster, era5_nextPeriod)
+    
+    # Filter layers where valid_time exceeds ceiling(max_timestamp + 1 hour)
+    cutoff_time <- lubridate::ceiling_date(max_timestamp + lubridate::hours(1), "hour")
+    # Parse valid_time from layer names
+    layer_times <- as.POSIXct(
+      as.numeric(gsub(".*valid_time=([0-9]+).*", "\\1", names(era5_raster))),
+      origin = "1970-01-01",
+      tz = "UTC"
+    )
+    
+    # Filter layers where valid_time exceeds cutoff_time
+    valid_layers <- which(layer_times <= cutoff_time)
+    
+    # Subset raster to retain only valid layers
+    era5_raster <- era5_raster[[valid_layers]]
   }
   
-  # Extract variable components
-  vars <- unique(paste0(terra::varnames(era5_raster), "_")) 
-  vars_longname <- unique(gsub(" ", "_", paste0(vars, terra::longnames(era5_raster))))
-  VarTimes <- as.POSIXct(
-    as.numeric(
-      unlist(lapply(names(era5_raster), function(x) {
-        gsub("valid_time=", "", 
-             regmatches(x, regexpr("valid_time=([0-9]+)", x, perl=TRUE))[[1]][2])
-      }))
-    ), 
-    origin = "1970-01-01", 
-    tz = "UTC"
-  )
   # Extract coordinates from the input data
-  coords <- extracted_data$location_data[, c("Long", "Lat")]# Extract valid_time values from layer names
-  
+  coords <- extracted_data$location_data[, c("Long", "Lat")]
   
   ### Interpolate in space: extract bilinear interpolated data of all variables at the track locations
   interpolated_inSpace <- terra::extract(era5_raster, coords, method = "bilinear")
   #drop ID column
   interpolated_inSpace <- interpolated_inSpace[,-1]
-  ### Now implement temporal interpolation
-  # Determine which layers to process based on dataset type
-  if (!grepl("pl", extracted_data$dataset)) {
-    layers_to_process <- unique(longnames(era5_raster))
-  } else {
-    # For pressure level data, we need to handle variable + pressure level combinations
-    # Extract unique pressure levels from variable names
-    pressLevs <- unique(gsub(".*pressure_level=([0-9]+)_valid_time=.*", "\\1", 
-                             names(interpolated_inSpace)))
-    
-    # Create all combinations of variables and pressure levels
-    layers_to_process <- unlist(lapply(vars, function(v) {
-      paste0(v, "pressure_level=", pressLevs)
-    }))
-  }
   
-  ### Use helper function for temporal interpolation
-  interpolated_inTime <- do.call(cbind, lapply(layers_to_process, function(x) {
-    .interpolate_in_time(
-      interpolated_in_space = interpolated_inSpace, 
-      layer_name = x, 
-      location_timestamps = extracted_data$location_data$timestamp
-    )
-  }))
+  # temporal interpolation
+  interpolated_inTime <- .interpolate_in_time(interpolated_inSpace, extracted_data)
   
-  ### For surface variables, no further processing needed
-  if(!grepl("pl", extracted_data$dataset)){
-    # Combine the input data and annotated env data
-    names(interpolated_inTime) <- unique(terra::longnames(era5_raster))
-    annotated_data <- cbind(extracted_data$location_data, interpolated_inTime)
-  } else {
-    ### For pressure level variables, interpolate in height using helper function
-    # Get variable names without the z_ (geopotential) variable
-    var_names <- unique(gsub("_pressure.*", "", names(interpolated_inTime)))
-    var_names <- var_names[!grepl("^z", var_names)]
-    
-    # Perform height interpolation for each variable
-    interpolated_inHeight <- do.call(cbind, lapply(var_names, function(v) {
-      # Set an appropriate longname for the output column
-      var_longname <- paste0(v, "_interpolated")
-      
-      .interpolate_in_height(
-        interpolated_in_time = interpolated_inTime,
-        variable_name = v,
-        location_heights = extracted_data$location_data$heights,
-        variable_longname = var_longname
-      )
-    }))
-    
-    # Combine the input data and height-interpolated data
+  # Combine location data with interpolated results
+  annotated_data <- cbind(extracted_data$location_data, interpolated_inTime)
+  
+  ### For pressure level variables, interpolate in height using helper function (if needed)
+  if (grepl("pl", extracted_data$dataset)) {
+    # Convert heights if they contain units in string format
+    if (is.character(annotated_data$heights)) {
+      annotated_data$heights <- as.numeric(gsub("\\s*\\[.*\\]", "", annotated_data$heights))
+    }
+    #interpolate to the height
+    interpolated_inHeight <- .interpolate_in_height(annotated_data)
+    #combine the data 
     annotated_data <- cbind(extracted_data$location_data, interpolated_inHeight)
-  }
-  # Adjust output file naming to reflect file type
-  if(!missing(pathToFolder)){
-    if (!dir.exists(pathToFolder)) {
-      dir.create(pathToFolder, recursive = TRUE)
-    }
-    
-    # Create appropriate filename based on file type
-    if (file_type == "daily") {
-      output_date <- format(extracted_data$era5_date_start, "%Y%m%d")
-    } else if (file_type == "weekly") {
-      week_part <- regmatches(extracted_data$dataset, regexpr("CW\\d{2}", extracted_data$dataset))
-      output_date <- paste0(format(extracted_data$era5_date_start, "%Y%m"), "_", week_part)
-    } else if (file_type == "monthly") {
-      output_date <- format(extracted_data$era5_date_start, "%Y%m")
-    }
-    
-    saveRDS(annotated_data, file = file.path(pathToFolder, paste0("annotatedData_",
-                                                                  output_date, "_", 
-                                                                  file_type, ".rds")))
-  }
-  
+  } 
+  #return the interpolated data
   return(annotated_data)
 }
-
-# annotate_era5_data <- function(extracted_data, pathToFolder) {
-#   # Load ERA5 raster file
-#   era5_raster <- terra::rast(extracted_data$era5_file_name)
-#   
-#   # Handle next-day raster file
-#   if (max(lubridate::hour(extracted_data$location_data$timestamp)) == 23) { 
-#     # Extract current date from filename
-#     file_date <- lubridate::ymd(gsub(".*_(\\d{8})\\.nc$", "\\1", extracted_data$era5_file_name))
-#     
-#     # Calculate next day's date
-#     next_day <- file_date + 1
-#     
-#     # Construct next day's filename
-#     folder <- dirname(extracted_data$era5_file_name)
-#     file_nextDay <- file.path(folder, paste0("ERA5_pl_", format(next_day, "%Y%m%d"), ".nc"))
-#     
-#     if (!file.exists(file_nextDay)) {
-#       warning("Data have locations after 11 pm. Raster file for following date is not available.")
-#     } else {
-#       # Load next day's raster
-#       era5_nextDay <- terra::rast(file_nextDay)
-#       
-#       # Extract and process time steps
-#       nextday_times <- terra::time(era5_nextDay)
-#       nextday_times <- nextday_times[nextday_times < lubridate::ymd_hms("2016-06-15 01:00:00")]
-#       
-#       # Add relevant time steps to main raster
-#       era5_raster <- terra::merge(era5_raster, era5_nextDay[[nextday_times]])
-#     }
-#   }
-#   
-#   # Extract variable components
-#   vars <- unique(paste0(terra::varnames(era5_raster), "_")) 
-#   vars_longname <- unique(gsub(" ", "_", paste0(vars, terra::longnames(era5_raster))))
-#   VarTimes <- as.POSIXct(
-#     as.numeric(
-#       unlist(lapply(names(era5_raster), function(x) {
-#         gsub("valid_time=", "", 
-#              regmatches(x, regexpr("valid_time=([0-9]+)", x, perl=TRUE))[[1]][2])
-#       }))
-#     ), 
-#     origin = "1970-01-01", 
-#     tz = "UTC"
-#   )
-#   # Extract coordinates from the input data
-#   coords <- extracted_data$location_data[, c("Long", "Lat")]# Extract valid_time values from layer names
-#   
-#   
-#   ### Interpolate in space: extract bilinear interpolated data of all variables at the track locations
-#   interpolated_inSpace <- terra::extract(era5_raster, coords, method = "bilinear")
-#   #drop ID column
-#   interpolated_inSpace <- interpolated_inSpace[,-1]
-#   ### Now implement temporal interpolation
-#   # Determine which layers to process based on dataset type
-#   if (!grepl("pl", extracted_data$dataset)) {
-#     layers_to_process <- unique(longnames(era5_raster))
-#   } else {
-#     # For pressure level data, we need to handle variable + pressure level combinations
-#     # Extract unique pressure levels from variable names
-#     pressLevs <- unique(gsub(".*pressure_level=([0-9]+)_valid_time=.*", "\\1", 
-#                              names(interpolated_inSpace)))
-#     
-#     # Create all combinations of variables and pressure levels
-#     layers_to_process <- unlist(lapply(vars, function(v) {
-#       paste0(v, "pressure_level=", pressLevs)
-#     }))
-#   }
-#   
-#   ### Use helper function for temporal interpolation
-#   interpolated_inTime <- do.call(cbind, lapply(layers_to_process, function(x) {
-#     .interpolate_in_time(
-#       interpolated_in_space = interpolated_inSpace, 
-#       layer_name = x, 
-#       location_timestamps = extracted_data$location_data$timestamp
-#     )
-#   }))
-#   
-#   ### For surface variables, no further processing needed
-#   if(!grepl("pl", extracted_data$dataset)){
-#     # Combine the input data and annotated env data
-#     names(interpolated_inTime) <- unique(terra::longnames(era5_raster))
-#     annotated_data <- cbind(extracted_data$location_data, interpolated_inTime)
-#   } else {
-#     ### For pressure level variables, interpolate in height using helper function
-#     # Get variable names without the z_ (geopotential) variable
-#     var_names <- unique(gsub("_pressure.*", "", names(interpolated_inTime)))
-#     var_names <- var_names[!grepl("^z", var_names)]
-#     
-#     # Perform height interpolation for each variable
-#     interpolated_inHeight <- do.call(cbind, lapply(var_names, function(v) {
-#       # Set an appropriate longname for the output column
-#       var_longname <- paste0(v, "_interpolated")
-#       
-#       .interpolate_in_height(
-#         interpolated_in_time = interpolated_inTime,
-#         variable_name = v,
-#         location_heights = extracted_data$location_data$heights,
-#         variable_longname = var_longname
-#       )
-#     }))
-#     
-#     # Combine the input data and height-interpolated data
-#     annotated_data <- cbind(extracted_data$location_data, interpolated_inHeight)
-#   }
-#   # Save results if path is provided
-#   if(!missing(pathToFolder)){
-#     if (!dir.exists(pathToFolder)) {
-#       dir.create(pathToFolder, recursive = TRUE)
-#     }
-#     saveRDS(annotated_data, file = file.path(pathToFolder, paste0("annotatedData_",
-#                                                                   extracted_data$era5_date, "_", 
-#                                                                   extracted_data$dataset, ".rds")))
-#   }
-#   
-#   return(annotated_data)
-# }
-# 
