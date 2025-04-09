@@ -942,7 +942,7 @@ annotate_era5_data <- function(extracted_data) {
     era5_nextPeriod <- terra::rast(file_nextPeriod)
     
     # merge rasters while preserving layer names
-    era5_raster <- terra:merge(era5_raster, era5_nextPeriod)
+    era5_raster <- terra::merge(era5_raster, era5_nextPeriod)
     
     # Filter layers where valid_time exceeds ceiling(max_timestamp + 1 hour)
     cutoff_time <- lubridate::ceiling_date(max_timestamp + lubridate::hours(1), "hour")
