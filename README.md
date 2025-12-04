@@ -142,6 +142,7 @@ This process adds environmental variables to each tracking location, handling:
 1. ✅ **Support for Generic Data Types**: The code now accepts both move2 objects and data.frames
 2. 🔄 **Additional ERA5 Variables**: Check support for all ERA5 products beyond wind components (temperature, humidity, etc.)
 3. 🔄 **Advanced Interpolation Methods**: Implement more sophisticated interpolation algorithms
+4. Try Terra::vrt for tiling instead of terra::merge.
 
 ## Acknowledgments
 
